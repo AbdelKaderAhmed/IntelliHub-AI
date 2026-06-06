@@ -1,0 +1,99 @@
+
+
+services:
+  # 1. Relational Database System (Multi-tenant structure and audit logs)
+  postgres_db:
+    image: postgres:16-alpine
+    container_name: intellihub_postgres
+    restart: always
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      POSTGRES_DB: ${POSTGRES_DB}
+    ports:
+      - "${POSTGRES_PORT}:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    networks:
+      - intellihub_network
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER} -d ${POSTGRES_DB}"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  # 2. Vector Database System (Semantic chunks & hybrid search indices)
+  qdrant_db:
+    image: qdrant/qdrant:v1.9.0
+    container_name: intellihub_qdrant
+    restart: always
+    ports:
+      - "${QDRANT_PORT}:6333"
+      - "${QDRANT_GRPC_PORT}:6334"
+    volumes:
+      - qdrant_data:/qdrant/storage
+    networks:
+      - intellihub_network
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:6333/healthz"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  # 3. Object Storage System (Raw Enterprise Documents and Artifacts)
+  minio_storage:
+    image: minio/minio:RELEASE.2024-01-28T22-35-53Z
+    container_name: intellihub_minio
+    restart: always
+    ports:
+      - "${MINIO_PORT}:9000"
+      - "${MINIO_CONSOLE_PORT}:9001"
+    environment:
+      MINIO_ROOT_USER: ${MINIO_ROOT_USER}
+      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD}
+    volumes:
+      - minio_data:/data
+    networks:
+      - intellihub_network
+    command: server /data --console-address ":9001"
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:9000/minio/health/live"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  # 4. FastAPI Enterprise Application Gateway (Backend Service Layer)
+  backend_api:
+    build:
+      context: ../../backend
+      dockerfile: Dockerfile
+    container_name: intellihub_backend
+    restart: always
+    depends_on:
+      postgres_db:
+        condition: service_healthy
+      qdrant_db:
+        condition: service_healthy
+      minio_storage:
+        condition: service_healthy
+    ports:
+      - "8000:8000"
+    volumes:
+      - ../../backend:/app
+      - ../../storage:/app/storage
+    env_file:
+      - ../../backend/.env
+    networks:
+      - intellihub_network
+
+networks:
+  intellihub_network:
+    driver: bridge
+
+volumes:
+  postgres_data:
+    driver: local
+  qdrant_data:
+    driver: local
+  minio_data:
+    driver: local

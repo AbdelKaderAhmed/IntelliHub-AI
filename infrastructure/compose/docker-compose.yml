@@ -1,68 +1,56 @@
-
-
 services:
-  # 1. Relational Database System (Multi-tenant structure and audit logs)
+  # 1. Relational Database System
   postgres_db:
     image: postgres:16-alpine
     container_name: intellihub_postgres
     restart: always
     environment:
-      POSTGRES_USER: ${POSTGRES_USER}
-      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
-      POSTGRES_DB: ${POSTGRES_DB}
+      POSTGRES_USER: ${POSTGRES_USER:-postgres}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-postgres}
+      POSTGRES_DB: ${POSTGRES_DB:-intellihub}
     ports:
-      - "${POSTGRES_PORT}:5432"
+      - "5432:5432"
     volumes:
       - postgres_data:/var/lib/postgresql/data
     networks:
       - intellihub_network
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER} -d ${POSTGRES_DB}"]
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-postgres} -d ${POSTGRES_DB:-intellihub}"]
       interval: 5s
       timeout: 5s
       retries: 5
 
-  # 2. Vector Database System (Semantic chunks & hybrid search indices)
+  # 2. Vector Database System
   qdrant_db:
     image: qdrant/qdrant:v1.9.0
     container_name: intellihub_qdrant
     restart: always
     ports:
-      - "${QDRANT_PORT}:6333"
-      - "${QDRANT_GRPC_PORT}:6334"
+      - "6333:6333"
+      - "6334:6334"
     volumes:
       - qdrant_data:/qdrant/storage
     networks:
       - intellihub_network
-    healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:6333/healthz"]
-      interval: 5s
-      timeout: 5s
-      retries: 5
 
-  # 3. Object Storage System (Raw Enterprise Documents and Artifacts)
+  # 3. Object Storage System
   minio_storage:
     image: minio/minio:RELEASE.2024-01-28T22-35-53Z
     container_name: intellihub_minio
     restart: always
     ports:
-      - "${MINIO_PORT}:9000"
-      - "${MINIO_CONSOLE_PORT}:9001"
+      - "9000:9000"
+      - "9001:9001"
     environment:
-      MINIO_ROOT_USER: ${MINIO_ROOT_USER}
-      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD}
+      MINIO_ROOT_USER: ${MINIO_ROOT_USER:-admin}
+      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD:-password}
     volumes:
       - minio_data:/data
     networks:
       - intellihub_network
     command: server /data --console-address ":9001"
-    healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:9000/minio/health/live"]
-      interval: 5s
-      timeout: 5s
-      retries: 5
 
-  # 4. FastAPI Enterprise Application Gateway (Backend Service Layer)
+  # 4. FastAPI Enterprise Application Gateway (Backend)
   backend_api:
     build:
       context: ../../backend
@@ -73,11 +61,13 @@ services:
       postgres_db:
         condition: service_healthy
       qdrant_db:
-        condition: service_healthy
+        condition: service_started
       minio_storage:
-        condition: service_healthy
+        condition: service_started
     ports:
       - "8000:8000"
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
     volumes:
       - ../../backend:/app
       - ../../storage:/app/storage
